@@ -3,16 +3,16 @@ This script fetches the HCP collection #4337 on NeuroVault and then processes it
 """
 import numpy as np
 import os
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, Memory
 from nilearn.datasets import fetch_neurovault_ids
 from sklearn.linear_model import (
     LassoCV, LinearRegression, LogisticRegression, LogisticRegressionCV)
 import sanssouci as sa
-# from preprocess_experiments import preprocess_hcp
-from knockoff_aggregation import _empirical_pval
-from hidimstat.knockoffs import _empirical_knockoff_eval
-from utils import quantile_aggregation
-from hidimstat.utils import fdr_threshold
+from utils_ko_hcp import _empirical_pval
+# from hidimstat.knockoffs import _empirical_knockoff_eval
+from utils import quantile_aggregation, _empirical_knockoff_eval
+# from hidimstat.utils import fdr_threshold
+from hidimstat.statistical_tools.multiple_testing import fdr_threshold
 from utils_ko_hcp import (
     aggregate_list_of_matrices,
     get_null_pvals_new,
@@ -24,6 +24,9 @@ from utils_ko_hcp import (
     report_fdp_tdp_size
 )
 from scipy.stats import hmean
+from sanssouci.post_hoc_bounds import find_largest_region
+
+mem = Memory(location='/home/bthirion/tmp/', verbose=0)   
 
 MASK_IMG = "mask_img.nii.gz"
 alpha = 0.1
@@ -40,7 +43,7 @@ snr = 5
 # sparsity = 0.1
 gaussian = True
 
-nv_data = fetch_neurovault_ids(collection_ids=(4337,))
+nv_data = mem.cache(fetch_neurovault_ids)(collection_ids=(4337,))
 
 
 def preprocess_hcp(data_dir='/data/parietal/store/data/HCP900/',
@@ -249,7 +252,7 @@ def get_hcp_data(experiment, n_jobs, n_clusters=1000, preloaded=True, n_subjects
         return X_reduced, y, cluster_labels, mask, ward
 
     else:
-        hcp_data = preprocess_hcp(
+        hcp_data = mem.cache(preprocess_hcp)(
             n_subjects=n_subjects, n_jobs=n_jobs, experiment=experiment)
         X = hcp_data.X
         y = hcp_data.y
@@ -365,7 +368,7 @@ def perform_inference(experiment_train, experiment_test, n_clusters, n_jobs, alp
     pvals_vanilla = pvals[0]
     W_goeman = preprocess_W_func_goeman(ko_stats[0])[0]
 
-    size_hmean = sa.find_largest_region(p_values_hmean, calibrated_thr_hmean, 1 - fdr)
+    size_hmean = find_largest_region(p_values_hmean, calibrated_thr_hmean, 1 - fdr)
     fdp_hmean_, tdp_hmean_, selected_hmean = report_fdp_tdp_size(p_values_hmean, size_hmean, non_zero_index, n_clusters)
     print(fdp_hmean_, tdp_hmean_)
 
@@ -413,11 +416,9 @@ all_pairs = all_pairs1 + all_pairs2
 
 print(len(all_pairs))
 
-nb_expes = len(all_pairs)
-# bounds_res = np.zeros((nb_expes, n_methods * 2))
-# sizes_res = np.zeros((nb_expes, n_methods))
+n_expes = len(all_pairs)
 
-for id_exp in range(nb_expes):
+for id_exp in range(n_expes):
     # print(all_pairs[id_exp])
     experiment_train, experiment_test = all_pairs[id_exp]
     # experiment_train, experiment_test = 'MOTOR_HAND', 'RELATIONAL'

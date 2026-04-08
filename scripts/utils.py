@@ -14,10 +14,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils import check_random_state
 from sklearn.utils.validation import check_memory
 
-from hidimstat.knockoffs.gaussian_knockoff import (_estimate_distribution,
-                                                   gaussian_knockoff_generation)
-from hidimstat.knockoffs.knockoff_aggregation import _empirical_pval
-from hidimstat.knockoffs.stat_coef_diff import _coef_diff_threshold
+# from hidimstat.knockoffs.gaussian_knockoff import gaussian_knockoff_generation
+# from hidimstat.knockoffs.stat_coef_diff import _coef_diff_threshold
 
 from sklearn.covariance import (GraphicalLassoCV, empirical_covariance,
                                 ledoit_wolf)
@@ -28,11 +26,107 @@ from sklearn.utils import shuffle
 from xgboost import XGBClassifier
 from sklearn.model_selection import GridSearchCV
 
-from valdiags.vanillaC2ST import c2st_scores
+# from valdiags.vanillaC2ST import c2st_scores
+from lc2st.lc2st import lc2st_scores
+
 import pandas as pd
 
 from statsmodels.distributions.empirical_distribution import ECDF, monotone_fn_inverter
 import xgboost as xgb
+
+
+def _empirical_knockoff_eval(test_score, ko_threshold):
+    """
+    Compute the empirical e-values from the knockoff test.
+
+    Parameters
+    ----------
+    test_score : 1D ndarray, shape (n_features, )
+        Vector of test statistics.
+
+    ko_threshold : float
+        Threshold level.
+
+    Returns
+    -------
+    evals : 1D ndarray, shape (n_features, )
+        Vector of empirical e-values.
+    """
+    evals = []
+    n_features = test_score.size
+
+    offset = 1  # Offset equals 1 is the knockoff+ procedure.
+
+    for i in range(n_features):
+        if test_score[i] < ko_threshold:
+            evals.append(0)
+        else:
+            evals.append(
+                n_features / (offset + np.sum(test_score <= -ko_threshold))
+            )
+
+    return np.array(evals)
+
+
+def gaussian_knockoff_generation(X, mu, Sigma, method='equi', memory=None, seed=None):
+    """Generate Gaussian knockoff variables for X, with mean mu and covariance
+    Sigma. Adapted from old hidimstat versions.
+    """
+    from sklearn.covariance import LedoitWolf
+    from hidimstat.samplers import GaussianKnockoffs
+    ko_generator=GaussianKnockoffs(
+        cov_estimator=LedoitWolf(assume_centered=True),
+        tol=1e-15,
+    )
+    return ko_generator.fit(X).sample(1)
+
+
+def _coeff_diff_threshold(X, X_tilde, labels, method='lasso_cv', return_alpha=False, alpha_chosen=None):
+    """Calculate test statistic by doing estimation with Cross-validation on
+    concatenated design matrix [X X_tilde] to find coefficients [beta
+    beta_tilde]. The test statistic is then:
+
+                        W_j =  abs(beta_j) - abs(beta_tilde_j)
+
+    Parameters
+    ----------
+    X : array-like of shape (n,p)
+        numpy array of size [n,p], containing n observations of p variables
+        (hypotheses)
+    X_tilde : array-like of shape (n,p)
+        numpy array of size [n,p], containing n observations of p knockoff
+        variables
+    labels : array-like of shape (n,)
+        numpy array of size [n], containing n values in {0, 1}, each of them
+        specifying the column indices of the first and the second sample.
+    method: str, optional
+        method for calculating test statistic. Currently support 'lasso_cv',
+        'lasso_lars_cv', 'elasticnet_cv', 'logistic_cv', 'logistic', and 'xgb'.
+        Default: 'lasso_cv'
+    return_alpha: bool, optional
+    """
+    # todo 
+
+
+def _empirical_pval(test_score, offset=1):
+    """Copied from old hidimstat"""
+    pvals = []
+    n_features = test_score.size
+
+    if offset not in (0, 1):
+        raise ValueError("'offset' must be either 0 or 1")
+
+    test_score_inv = -test_score
+    for i in range(n_features):
+        if test_score[i] <= 0:
+            pvals.append(1)
+        else:
+            pvals.append(
+                (offset + np.sum(test_score_inv >= test_score[i])) /
+                n_features
+            )
+
+    return np.array(pvals)
 
 
 def quantile_aggregation(pvals, gamma=0.5, gamma_min=0.05, adaptive=False, drop_gamma=False):

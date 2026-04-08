@@ -2,10 +2,16 @@
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from hidimstat.utils import  quantile_aggregation
+from utils import quantile_aggregation
 from sklearn.utils import check_random_state
 from joblib import Parallel, delayed
-from hidimstat.gaussian_knockoff import gaussian_knockoff_generation
+# from hidimstat.gaussian_knockoff import gaussian_knockoff_generation
+from utils import _empirical_pval, gaussian_knockoff_generation
+from nilearn.glm import fdr_threshold
+from sklearn.model_selection import GridSearchCV
+from xgboost import XGBClassifier
+from sklearn.utils import shuffle
+from lc2st.c2st import c2st_scores
 
 
 def _estimate_distribution(X, shrink=False, cov_estimator='ledoit_wolf'):
@@ -187,6 +193,7 @@ def get_knockoffs_stats(
     pval0 : array-like of shape (B, p)
         A numpy array of size [B,p] with each row containing a vector of
         p knockoff p-values
+
     References
     ----------
     .. [1] Nguyen, T.B., Chevalier, J.A., Thirion, B. and Arlot, S.,
@@ -230,13 +237,6 @@ def get_knockoffs_stats(
         else:
             preds = np.array(Parallel(n_jobs=n_jobs)(delayed(
                 _get_single_clf_ko)(X, j, method_ko_gen) for j in tqdm(range(p))))
-            
-
-            # for seed in seed_list:
-                # lp = LineProfiler()
-                # lp_wrapper = lp(conditional_sequential_gen_ko)
-                # X_tildes.append(lp_wrapper(X, clfs, n_jobs=n_jobs, seed=seed))
-                # lp.print_stats()
             
             X_tildes = [conditional_sequential_gen_ko(
                 X,
@@ -290,11 +290,6 @@ def perform_inference_given_KO(
     """
     Performance inference with Knockoffs already computed.
     """
-    from nilearn.glm import fdr_threshold
-    from sklearn.model_selection import GridSearchCV
-    from xgboost import XGBClassifier
-    from sklearn.utils import shuffle
-    from valdiags.c2st import c2st_scores
 
     p = len(ko_stats[0])
     params = {
@@ -509,22 +504,3 @@ def stat_coef_diff(X, X_tilde, y, method='lasso_cv', n_splits=5, n_jobs=1,
     return test_score
 
 
-def _empirical_pval(test_score, offset=1):
-    """Copied from old hidimstat"""
-    pvals = []
-    n_features = test_score.size
-
-    if offset not in (0, 1):
-        raise ValueError("'offset' must be either 0 or 1")
-
-    test_score_inv = -test_score
-    for i in range(n_features):
-        if test_score[i] <= 0:
-            pvals.append(1)
-        else:
-            pvals.append(
-                (offset + np.sum(test_score_inv >= test_score[i])) /
-                n_features
-            )
-
-    return np.array(pvals)
