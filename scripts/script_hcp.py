@@ -301,22 +301,16 @@ def get_hcp_data(experiment, n_jobs, n_clusters=1000, preloaded=True, n_subjects
         return X_reduced, y, cluster_labels, mask, None
 
 
-def perform_inference(experiment_train, experiment_test, n_clusters, n_jobs, alpha, fdr, snr, draws):
-    """
-    For a pair of HCP experiments, generate semi-simulated data and perform inference
-    using 5 Knockoffs-based methods.
-    
-    """
-
-    k_opti = [5, 8, 15, 21, 31, 45, 63, 77, 84, 103, 116]
-    v_opti = [1, 2, 5, 8, 13, 18, 25, 32, 41, 50, 61]
-    
-    X_reduced_train, y_train, cluster_labels_train, mask_train, ward_train = get_hcp_data(
-        experiment_train, n_jobs, n_clusters=n_clusters, preloaded=False)
-
+def hybrid_simulation(X_reduced_train, X_reduced_test, y_train):
+    """Create a hybrid dataset, with realistic GT and relying on observed  X's"""
     lambda_max = np.max(np.dot(X_reduced_train.T, y_train)) / (2 * X_reduced_train.shape[1])
     print(lambda_max)
-    clf = LogisticRegression(C=1/(lambda_max*0.1), penalty='l1', max_iter=int(1e4), n_jobs=n_jobs, solver='liblinear')
+    clf = LogisticRegression(
+        C=1/(lambda_max*0.1),
+        penalty='l1',
+        max_iter=int(1e4),
+        n_jobs=n_jobs,
+        solver='liblinear')
     clf.fit(X_reduced_train, y_train)
 
     beta_train = clf.coef_ # generate ground truth
@@ -332,14 +326,42 @@ def perform_inference(experiment_train, experiment_test, n_clusters, n_jobs, alp
 
     print(len(non_zero_index))
     print(experiment_train, experiment_test)
-    X_reduced_test, _, cluster_labels_test, mask_test, _ = get_hcp_data(
-        experiment_test, n_jobs, n_clusters=n_clusters, preloaded=False)
     prod_temp = np.dot(X_reduced_test, beta_train)
     eps = np.random.normal(size=X_reduced_test.shape[0])
     noise_mag = np.linalg.norm(prod_temp) / (snr * np.linalg.norm(eps))
 
     y_test = prod_temp + noise_mag * eps # generate new y
+    return y_test, beta_train, non_zero_index
 
+
+def perform_inference(
+    experiment_train,
+    experiment_test,
+    n_clusters,
+    n_jobs,
+    alpha,
+    fdr,
+    snr,
+    draws
+):
+    """
+    For a pair of HCP experiments, generate semi-simulated data and perform inference
+    using 5 Knockoffs-based methods.
+    
+    """
+
+    k_opti = [5, 8, 15, 21, 31, 45, 63, 77, 84, 103, 116]
+    v_opti = [1, 2, 5, 8, 13, 18, 25, 32, 41, 50, 61]
+    
+    X_reduced_train, y_train, cluster_labels_train, mask_train, ward_train = get_hcp_data(
+        experiment_train, n_jobs, n_clusters=n_clusters, preloaded=False)
+    X_reduced_test, _, cluster_labels_test, mask_test, _ = get_hcp_data(
+        experiment_test, n_jobs, n_clusters=n_clusters, preloaded=False)
+
+    # simulate y_test
+    y_test, beta_train, non_zero_index = hybrid_simulation(
+        X_reduced_train, X_reduced_test, y_train)
+    
     ko_stats, X_tildes, alphas_chosen, active_sets = get_knockoffs_stats(
         X_reduced_test,
         y_test,
@@ -352,8 +374,15 @@ def perform_inference(experiment_train, experiment_test, n_clusters, n_jobs, alp
         seed=seed)
 
     fdp_, acc_ = perform_inference_given_KO(
-            X_reduced_test, ko_stats, X_tildes, fdr, beta_train, draws=draws, n_jobs=n_jobs, diag=True
-        )
+        X_reduced_test,
+        ko_stats,
+        X_tildes,
+        fdr,
+        beta_train,
+        draws=draws,
+        n_jobs=n_jobs,
+        diag=True
+    )
     
     print(acc_)
 
@@ -368,28 +397,60 @@ def perform_inference(experiment_train, experiment_test, n_clusters, n_jobs, alp
     pvals_vanilla = pvals[0]
     W_goeman = preprocess_W_func_goeman(ko_stats[0])[0]
 
-    size_hmean = find_largest_region(p_values_hmean, calibrated_thr_hmean, 1 - fdr)
-    fdp_hmean_, tdp_hmean_, selected_hmean = report_fdp_tdp_size(p_values_hmean, size_hmean, non_zero_index, n_clusters)
+    size_hmean = find_largest_region(
+        p_values_hmean,
+        calibrated_thr_hmean,
+        1 - fdr
+    )
+    fdp_hmean_, tdp_hmean_, selected_hmean = report_fdp_tdp_size(
+        p_values_hmean,
+        size_hmean,
+        non_zero_index,
+        n_clusters
+    )
     print(fdp_hmean_, tdp_hmean_)
 
     ebh_threshold = fdr_threshold(e_values, fdr=fdr, method='ebh')
     size_ebh = len(np.where(e_values >= ebh_threshold)[0])
-    fdp_ebh_, tdp_ebh_, selected_ebh = report_fdp_tdp_size(e_values, size_ebh, non_zero_index, n_clusters, use_evalues=True)
+    fdp_ebh_, tdp_ebh_, selected_ebh = report_fdp_tdp_size(
+        e_values,
+        size_ebh,
+        non_zero_index,
+        n_clusters,
+        use_evalues=True
+    )
     print(fdp_ebh_, tdp_ebh_)
 
     ako_threshold = fdr_threshold(p_values_cal, fdr=fdr, method='bhq')
     size_ako = len(np.where(p_values_cal <= ako_threshold)[0])
-    fdp_ako_, tdp_ako_, selected_ako = report_fdp_tdp_size(p_values_cal, size_ako, non_zero_index, n_clusters)
+    fdp_ako_, tdp_ako_, selected_ako = report_fdp_tdp_size(
+        p_values_cal,
+        size_ako,
+        non_zero_index,
+        n_clusters
+    )
     print(fdp_ako_, tdp_ako_)
 
     # W_goeman = ko_stats[0]
-    size_goeman, cutoff_goeman = find_largest_region_goeman(W_goeman, k_opti, v_opti, 1 - fdr)
-    fdp_goeman_, tdp_goeman_, selected_goeman = report_fdp_tdp_size(np.array(ko_stats[0]), size_goeman, non_zero_index, n_clusters, use_evalues=True)
+    size_goeman, cutoff_goeman = find_largest_region_goeman(
+        W_goeman, k_opti, v_opti, 1 - fdr)
+    fdp_goeman_, tdp_goeman_, selected_goeman = report_fdp_tdp_size(
+        np.array(ko_stats[0]),
+        size_goeman,
+        non_zero_index,
+        n_clusters,
+        use_evalues=True
+    )
     print(fdp_goeman_, tdp_goeman_)
 
     vanilla_threshold = fdr_threshold(pvals_vanilla, fdr=fdr, method='bhq')
     size_vanilla = len(np.where(pvals_vanilla <= vanilla_threshold)[0])
-    fdp_vanilla_, tdp_vanilla_, selected_vanilla = report_fdp_tdp_size(pvals_vanilla, size_vanilla, non_zero_index, n_clusters)
+    fdp_vanilla_, tdp_vanilla_, selected_vanilla = report_fdp_tdp_size(
+        pvals_vanilla,
+        size_vanilla,
+        non_zero_index,
+        n_clusters
+    )
     print(fdp_vanilla_, tdp_vanilla_)
 
     return [
