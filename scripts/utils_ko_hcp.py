@@ -1,17 +1,26 @@
-"""Contains some ancillary functions for script_hcp.py"""
+"""Contains some ancillary functions for script_hcp.py
+
+TODO: move elsewhere anything not specific to HCP data
+"""
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from utils import quantile_aggregation
 from sklearn.utils import check_random_state
 from joblib import Parallel, delayed
-# from hidimstat.gaussian_knockoff import gaussian_knockoff_generation
 from utils import _empirical_pval, gaussian_knockoff_generation
 from nilearn.glm import fdr_threshold
 from sklearn.model_selection import GridSearchCV
 from xgboost import XGBClassifier
 from sklearn.utils import shuffle
 from lc2st.c2st import c2st_scores
+from non_gaussian_ko_scip import (
+    scip,
+    _get_single_clf_ko,
+    conditional_sequential_gen_ko,
+    _adjust_marginal
+)
+from tqdm import tqdm
 
 
 def _estimate_distribution(X, shrink=False, cov_estimator='ledoit_wolf'):
@@ -230,8 +239,7 @@ def get_knockoffs_stats(
     else:
 
         if use_scip:
-            X_ko_scip = scip(X)
-            X_tildes = [X_ko_scip for seed in seed_list]
+            X_tildes = [scip(X, seed) for seed in seed_list]
             X_tildes = np.array(X_tildes)
         
         else:
@@ -248,10 +256,8 @@ def get_knockoffs_stats(
             X_tildes = np.array(X_tildes)   
 
     mem = check_memory(memory)
-    stat_coef_diff_cached = mem.cache(stat_coef_diff,
-                                      ignore=['n_jobs', 'joblib_verbose'])
-
-
+    stat_coef_diff_cached = mem.cache(
+        stat_coef_diff, ignore=['n_jobs', 'joblib_verbose'])
 
     if alpha_chosen is not None:
         ko_stats = np.array(parallel(delayed(stat_coef_diff_cached)(
@@ -275,7 +281,6 @@ def get_knockoffs_stats(
             ko_stats = np.array(ko_stats)
             alphas_chosen = np.array(alphas_chosen)
             active_sets = np.array(active_sets)
-
             return ko_stats, X_tildes, alphas_chosen, active_sets
         else:
             ko_stats = np.array(parallel(delayed(stat_coef_diff_cached)(
@@ -286,35 +291,38 @@ def get_knockoffs_stats(
 
 
 def perform_inference_given_KO(
-        X_ht, ko_stats, X_tildes, q, beta, draws=2, n_folds=5, n_jobs=1, diag=False):
+        X_ht, ko_stats, X_tildes, q, beta, n_folds=5, n_jobs=1, diag=False):
     """
     Performance inference with Knockoffs already computed.
     """
-
+    draws = ko_stats.shape[0]
     p = len(ko_stats[0])
-    params = {
-        'n_estimators': [1, 3, 5, 10],
-        'reg_lambda': [0, 0.1, 1.0, 5.0, 10.0],
-        'reg_alpha': [0, 0.1, 1.0],
-        'max_depth': [1, 3, 5, 10, 50],
-        'colsample_bytree' : [0.3, 1],
-        }
     
-    pvals = np.array([_empirical_pval(ko_stats[i], 1) for i in range(draws)])
+    pvals = np.array(
+        [_empirical_pval(ko_stats[i], 1) for i in range(draws)])
 
     # select features (w.r.t p-values)
     vanilla_threshold = fdr_threshold(pvals[0], alpha=q)
+    if np.isinf(vanilla_threshold):
+        vanilla_threshold = 0
     selected_ko = np.where(pvals[0] <= vanilla_threshold)[0]
     size_vanilla = len(selected_ko)
 
     # compute fdr and tdr
     non_zero_index = np.where(beta != 0)[0]
-    fdr_, tdr_vanilla_, selected_vanilla = report_fdp_tdp_size(
+    fdr_vanilla, tdr_vanilla_, selected_vanilla = report_fdp_tdp_size(
         pvals[0], size_vanilla, non_zero_index, p
     )
-    print(fdr_, tdr_vanilla_)
+    print('detections: ', selected_ko)
 
     if diag:
+        params = {
+            'n_estimators': [1, 3, 5, 10],
+            'reg_lambda': [0, 0.1, 1.0, 5.0, 10.0],
+            'reg_alpha': [0, 0.1, 1.0],
+            'max_depth': [1, 3, 5, 10, 50],
+            'colsample_bytree' : [0.3, 1],
+        }
         clf = GridSearchCV(XGBClassifier(), params, cv=3, verbose=1, n_jobs=n_jobs)
 
         features = np.concatenate([X_ht, X_tildes[0]], axis=0)  # (2*n_samples, dim)
@@ -337,10 +345,11 @@ def perform_inference_given_KO(
 
         print(np.mean(df_result1['accuracy']))
     
-        return fdr_, accs
+        return fdr_vanilla, accs
     
     else:
-        return fdr_
+        return fdr_vanilla
+
 
 def report_fdp_tdp_size(p_values, region_size, non_zero_index, n_clusters, use_evalues=False):
     """

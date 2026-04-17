@@ -9,10 +9,21 @@ from sklearn.linear_model import (LassoLarsCV, LassoLars)
 from sklearn.utils import check_random_state
 from tqdm import tqdm
 from statsmodels.distributions.empirical_distribution import ECDF, monotone_fn_inverter
-# from line_profiler import LineProfiler
+from sklearn.utils._testing import ignore_warnings
+from sklearn.exceptions import ConvergenceWarning
 
 
-def simu_data(n, p, rho=0.25, snr=2.0, sparsity=0.06, effect=1.0, Sigma_real=None, binarize=False, no_blobs=False, seed=None):
+def simu_data(
+        n,
+        p,
+        rho=0.25,
+        snr=2.0,
+        sparsity=0.06,
+        effect=1.0,
+        Sigma_real=None,
+        binarize=False,
+        no_blobs=False,
+        seed=None):
     """Function to simulate data follow an autoregressive structure with Toeplitz
     covariance matrix
 
@@ -274,6 +285,7 @@ def _get_samples(X, clfs, seed=None):
     return samples
 
 
+@ignore_warnings(category=ConvergenceWarning)
 def _get_single_clf_ko(X, j, method="lasso"):
     n, p = X.shape
     idc = np.array([i for i in np.arange(0, p) if i != j])

@@ -26,24 +26,6 @@ from utils_ko_hcp import (
 from scipy.stats import hmean
 from sanssouci.post_hoc_bounds import find_largest_region
 
-mem = Memory(location='/home/bthirion/tmp/', verbose=0)   
-
-MASK_IMG = "mask_img.nii.gz"
-alpha = 0.1
-fdr = 0.1
-n_jobs = 10
-B = 2000
-method = 'lasso_cv'
-draws = 50
-seed = 42
-n_clusters = 1000
-k_max = int(n_clusters/50)
-# n_subjects = None
-snr = 5
-# sparsity = 0.1
-gaussian = True
-
-nv_data = mem.cache(fetch_neurovault_ids)(collection_ids=(4337,))
 
 
 def preprocess_hcp(data_dir='/data/parietal/store/data/HCP900/',
@@ -183,36 +165,6 @@ def fetch_hcp(nv_data, n_subjects):
         mask=MASK_IMG 
     )
 
-
-parallel = Parallel(n_jobs)
-learned_tpl_raw = np.array(
-    parallel(delayed(get_template_new)(B, n_clusters) for draw in range(draws)))
-pval0_raw = np.array(
-    parallel(delayed(get_null_pvals_new)(B, n_clusters) for draw in range(draws)))
-pval0_hmean = aggregate_list_of_matrices(
-    pval0_raw, gamma=0.3, use_hmean=True)
-
-learned_tpl_hmean_ = aggregate_list_of_matrices(
-    learned_tpl_raw,
-    gamma=0.3,
-    use_hmean=True)
-learned_tpl_hmean = np.sort(learned_tpl_hmean_, axis=0)
-calibrated_thr_hmean = sa.calibrate_jer(
-    alpha,
-    learned_tpl_hmean,
-    pval0_hmean,
-    k_max)
-
-experiments = [
-    'MOTOR_HAND',
-    'MOTOR_FOOT',
-    'GAMBLING',
-    'RELATIONAL',
-    'EMOTION',
-    'SOCIAL',
-    'WM',
-]  
-        
 
 def get_hcp_data(experiment, n_jobs, n_clusters=1000, preloaded=True, n_subjects=150):
     """"""
@@ -467,11 +419,64 @@ def perform_inference(
     ], [size_hmean, size_goeman, size_ebh, size_ako, size_vanilla]
 
 
+mem = Memory(location='/home/bthirion/tmp/', verbose=0)   
 
+MASK_IMG = "data/mask_img.nii.gz"
+alpha = 0.1
+fdr = 0.1
+n_jobs = 10
+B = 2000
+method = 'lasso_cv'
+draws = 50
+seed = 42
+n_clusters = 1000
+k_max = int(n_clusters/50)
+# n_subjects = None
+snr = 5
+# sparsity = 0.1
+gaussian = True
+
+# --
+# get the data
+nv_data = mem.cache(fetch_neurovault_ids)(collection_ids=(4337,))
+
+# --
+# create templates
+parallel = Parallel(n_jobs)
+learned_tpl_raw = np.array(
+    parallel(delayed(get_template_new)(B, n_clusters) for draw in range(draws)))
+pval0_raw = np.array(
+    parallel(delayed(get_null_pvals_new)(B, n_clusters) for draw in range(draws)))
+pval0_hmean = aggregate_list_of_matrices(
+    pval0_raw, gamma=0.3, use_hmean=True)
+
+learned_tpl_hmean_ = aggregate_list_of_matrices(
+    learned_tpl_raw,
+    gamma=0.3,
+    use_hmean=True)
+learned_tpl_hmean = np.sort(learned_tpl_hmean_, axis=0)
+calibrated_thr_hmean = sa.calibrate_jer(
+    alpha,
+    learned_tpl_hmean,
+    pval0_hmean,
+    k_max)
+
+#--
+# run experiments
+experiments = [
+    'MOTOR_HAND',
+    'MOTOR_FOOT',
+    'GAMBLING',
+    'RELATIONAL',
+    'EMOTION',
+    'SOCIAL',
+    'WM',
+]  
+        
 n_methods = 5
 
 import itertools
-all_pairs1 = list(itertools.combinations(experiments, 2))
+all_pairs1 = list(itertools.combinations(experiments, 2))[:3] # to limit cpu time
 all_pairs2 = [t[::-1] for t in all_pairs1]
 all_pairs = all_pairs1 + all_pairs2
 
