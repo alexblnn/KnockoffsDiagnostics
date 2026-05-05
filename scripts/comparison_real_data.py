@@ -14,7 +14,6 @@ from joblib import Parallel, delayed, Memory
 from nilearn.datasets import fetch_neurovault_ids
 from sklearn.linear_model import (
     LassoCV, LinearRegression, LogisticRegression, LogisticRegressionCV)
-import sanssouci as sa
 from hidimstat.statistical_tools.multiple_testing import fdr_threshold
 from utils_ko_hcp import (
     aggregate_list_of_matrices,
@@ -30,9 +29,11 @@ from scipy.stats import hmean
 from hidimstat import ModelXKnockoff
 from hidimstat.samplers import GaussianKnockoffs
 from sklearn.covariance import LedoitWolf, GraphicalLassoCV
-import pickle
+from nilearn.image import new_img_like
+from nilearn.plotting import plot_roi, show
 
 mem = Memory(location='/home/bthirion/tmp/', verbose=0)   
+
 
 MASK_IMG = "data/mask_img.nii.gz"
 alpha = 0.1
@@ -43,11 +44,14 @@ method = 'lasso_cv'
 draws = 50
 seed = 42
 n_clusters = 1000
-k_max = int(n_clusters/50)
+k_max = int(n_clusters / 50)
 # n_subjects = None
 snr = 5
 # sparsity = 0.1
 gaussian = True
+results_dir = 'results'
+if not os.path.exists(results_dir):
+    os.makedirs(results_dir)
 
 nv_data = mem.cache(fetch_neurovault_ids)(collection_ids=(4337,))
 
@@ -253,7 +257,18 @@ def get_hcp_data(experiment, n_jobs, n_clusters=1000, preloaded=True, n_subjects
     np.save(specific_names[3], mask)
     mask_img.to_filename('{}.nii.gz'.format(specific_names[4]))
     
-    return X_reduced, y, cluster_labels, mask, None
+    return X_reduced, y, cluster_labels, mask_img, ward
+
+
+def make_image(selection, mask_img, ward):
+        """Make an image of the selected clusters"""
+        binary = np.zeros(ward.n_clusters)
+        binary[selection] = 1
+        voxel_select = binary[ward.labels_]
+        mask =  mask_img.get_fdata()
+        data_select = mask.copy()
+        data_select[mask > 0] = voxel_select
+        return new_img_like(mask_img, data_select)
 
 
 def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, draws):
@@ -317,14 +332,14 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
         use_scip=False,
         seed=seed)
     assert len(ko_stats) == draws
-    fdp_gauss, acc_gauss = perform_inference_given_KO(
+    fdp_gauss, acc_gauss, selection_gauss = perform_inference_given_KO(
         X_reduced_train,
         ko_stats,
         X_tildes,
         fdr,
         beta_train,
         n_jobs=n_jobs,
-        diag=True
+        diagnosis=True
     )
 
     # -- GraphicalLassoCV knockoff generation
@@ -365,14 +380,14 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
         use_scip=False,
         seed=seed)
     assert len(ko_stats) == draws
-    fdp_scip, acc_scip = perform_inference_given_KO(
+    fdp_scip, acc_scip, selection_scip = perform_inference_given_KO(
         X_reduced_train,
         ko_stats,
         X_tildes,
         fdr,
         beta_train,
         n_jobs=n_jobs,
-        diag=True
+        diagnosis=True
     )
 
     # -- scip knockoff generation
@@ -387,17 +402,23 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
         gaussian=False,
         use_scip=True,
         seed=seed)
-    fdp_parallel, acc_parallel = perform_inference_given_KO(
+    fdp_parallel, acc_parallel, selection_parallel = perform_inference_given_KO(
         X_reduced_train,
         ko_stats,
         X_tildes,
         fdr,
         beta_train,
         n_jobs=n_jobs,
-        diag=True
+        diagnosis=True
     )
+    
+    img_gauss = make_image(selection_gauss, mask_train, ward_train)
+    img_scip = make_image(selection_scip, mask_train, ward_train)
+    img_parallel = make_image(selection_parallel, mask_train, ward_train)
+    img_gauss.to_filename(results_dir + '/{}_gaussian_ko_selection.nii.gz'.format(experiment_train))
+    img_scip.to_filename(results_dir + '/{}_scip_ko_selection.nii.gz'.format(experiment_train))
+    img_parallel.to_filename(results_dir + '/{}_parallel_ko_selection.nii.gz'.format(experiment_train))
 
-    stop
 
 experiments = [
     'MOTOR_HAND',
@@ -412,12 +433,16 @@ n_methods = 5
 
 import itertools
 
-n_exps = len(experiments)
+n_experiments = len(experiments)
 # bounds_res = np.zeros((nb_expes, n_methods * 2))
 # sizes_res = np.zeros((nb_expes, n_methods))
 
-for id_exp in range(n_exps):
+for id_exp in range(n_experiments):
     experiment_train = experiments[id_exp]
+    fdr = 0.1
+    if experiment_train in ['MOTOR_HAND']:
+        fdr = .2
+
     perform_inference(
         experiment_train,
         n_clusters,
@@ -426,4 +451,5 @@ for id_exp in range(n_exps):
         fdr,
         snr,
         draws)
+    
     

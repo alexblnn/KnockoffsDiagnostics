@@ -291,7 +291,7 @@ def get_knockoffs_stats(
 
 
 def perform_inference_given_KO(
-        X_ht, ko_stats, X_tildes, q, beta, n_folds=5, n_jobs=1, diag=False):
+        X_ht, ko_stats, X_tildes, q, beta, n_folds=5, n_jobs=1, diagnosis=False):
     """
     Performance inference with Knockoffs already computed.
     """
@@ -315,7 +315,7 @@ def perform_inference_given_KO(
     )
     print('detections: ', selected_ko)
 
-    if diag:
+    if diagnosis:
         params = {
             'n_estimators': [1, 3, 5, 10],
             'reg_lambda': [0, 0.1, 1.0, 5.0, 10.0],
@@ -345,10 +345,10 @@ def perform_inference_given_KO(
 
         print(np.mean(df_result1['accuracy']))
     
-        return fdr_vanilla, accs
+        return fdr_vanilla, accs, selected_ko
     
     else:
-        return fdr_vanilla
+        return fdr_vanilla, selected_ko
 
 
 def report_fdp_tdp_size(p_values, region_size, non_zero_index, n_clusters, use_evalues=False):

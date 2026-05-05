@@ -29,8 +29,13 @@ from sanssouci.post_hoc_bounds import find_largest_region
 
 
 def preprocess_hcp(data_dir='/data/parietal/store/data/HCP900/',
-                   n_subjects=150, experiment='RELATIONAL', no_mask=False,
-                   mask_type='classic', mask_file=None, n_jobs=1, memory=None):
+                   n_subjects=150,
+                   experiment='RELATIONAL',
+                   no_mask=False,
+                   mask_type='classic',
+                   mask_file=None,
+                   n_jobs=1,
+                   memory=None):
     """Available experiment: 'EMOTION', 'GAMBLING', 'LANGUAGE', 'MOTOR',
     'RELATIONAL', 'SOCIAL', 'WM'
 
@@ -214,7 +219,6 @@ def get_hcp_data(experiment, n_jobs, n_clusters=1000, preloaded=True, n_subjects
         n_samples, n_voxels = X.shape
         shape = mask.shape
 
-
         connectivity = grid_to_graph(
             n_x=shape[0], n_y=shape[1], n_z=shape[2], mask=mask)
 
@@ -325,7 +329,7 @@ def perform_inference(
         gaussian=gaussian,
         seed=seed)
 
-    fdp_, acc_ = perform_inference_given_KO(
+    fdp_, acc_, _make_table = perform_inference_given_KO(
         X_reduced_test,
         ko_stats,
         X_tildes,
@@ -333,7 +337,7 @@ def perform_inference(
         beta_train,
         draws=draws,
         n_jobs=n_jobs,
-        diag=True
+        diagnosis=True
     )
     
     print(acc_)
