@@ -341,6 +341,7 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
         n_jobs=n_jobs,
         diagnosis=True
     )
+    
 
     # -- GraphicalLassoCV knockoff generation
     """
@@ -367,7 +368,6 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
     print(np.where(selected))
     """
     # parallel knockoff generation
-    draws = 1
     ko_stats, X_tildes, alphas_chosen, active_sets = get_knockoffs_stats(
         X_reduced_train,
         y_train,
@@ -411,7 +411,6 @@ def perform_inference(experiment_train, n_clusters, n_jobs, alpha, fdr, snr, dra
         n_jobs=n_jobs,
         diagnosis=True
     )
-    
     img_gauss = make_image(selection_gauss, mask_train, ward_train)
     img_scip = make_image(selection_scip, mask_train, ward_train)
     img_parallel = make_image(selection_parallel, mask_train, ward_train)
@@ -429,19 +428,15 @@ experiments = [
     'SOCIAL',
     'WM',
 ]  
-n_methods = 5
 
 import itertools
 
 n_experiments = len(experiments)
-# bounds_res = np.zeros((nb_expes, n_methods * 2))
-# sizes_res = np.zeros((nb_expes, n_methods))
 
 for id_exp in range(n_experiments):
     experiment_train = experiments[id_exp]
-    fdr = 0.1
-    if experiment_train in ['MOTOR_HAND']:
-        fdr = .2
+    fdr = 0.2
+    # fdr = .1 returns empty results for all methods, which is not very interesting to compare
 
     perform_inference(
         experiment_train,

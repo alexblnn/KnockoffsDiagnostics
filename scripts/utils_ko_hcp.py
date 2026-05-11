@@ -54,9 +54,16 @@ def _estimate_distribution(X, shrink=False, cov_estimator='ledoit_wolf'):
     return mu, Sigma
 
 
-def aggregate_list_of_matrices(pval0_raw, gamma=0.5, gamma_min=0.05, 
-                               adaptive=False, drop_gamma=False, use_hmean=False,
-                               use_arithmetic=False, use_geometric=False):    
+def aggregate_list_of_matrices(
+        pval0_raw,
+        gamma=0.5,
+        gamma_min=0.05, 
+        adaptive=False,
+        drop_gamma=False,
+        use_hmean=False,
+        use_arithmetic=False,
+        use_geometric=False
+    ):    
     """
     Provided "draws" permuted pvalues matrices pval0, aggregate them to retain a single
     permuted aggregated p-values matrix
@@ -298,20 +305,24 @@ def perform_inference_given_KO(
     draws = ko_stats.shape[0]
     p = len(ko_stats[0])
     
-    pvals = np.array(
+    pvals_ = np.array(
         [_empirical_pval(ko_stats[i], 1) for i in range(draws)])
 
+    # perform aggregation of p-values across draws
+    pvals_ = pvals_.reshape(draws, 1, p)
+    pvals = aggregate_list_of_matrices(pvals_, gamma=.5)[0]
+
     # select features (w.r.t p-values)
-    vanilla_threshold = fdr_threshold(pvals[0], alpha=q)
+    vanilla_threshold = fdr_threshold(pvals, alpha=q)
     if np.isinf(vanilla_threshold):
         vanilla_threshold = 0
-    selected_ko = np.where(pvals[0] <= vanilla_threshold)[0]
+    selected_ko = np.where(pvals <= vanilla_threshold)[0]
     size_vanilla = len(selected_ko)
 
     # compute fdr and tdr
     non_zero_index = np.where(beta != 0)[0]
     fdr_vanilla, tdr_vanilla_, selected_vanilla = report_fdp_tdp_size(
-        pvals[0], size_vanilla, non_zero_index, p
+        pvals, size_vanilla, non_zero_index, p
     )
     print('detections: ', selected_ko)
 
